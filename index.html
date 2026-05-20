@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>自己紹介</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f4ef;
+      --text: #222831;
+      --muted: #5d6673;
+      --accent: #2f6f73;
+      --accent-dark: #24575a;
+      --card: #ffffff;
+      --line: #ded8ce;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.7;
+      color: var(--text);
+      background: var(--bg);
+    }
+
+    main {
+      width: min(920px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 56px 0;
+    }
+
+    .hero {
+      padding: 56px 0 40px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .eyebrow {
+      margin: 0 0 12px;
+      color: var(--accent);
+      font-size: 0.9rem;
+      font-weight: 700;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(2.4rem, 7vw, 4.5rem);
+      line-height: 1.1;
+      letter-spacing: 0;
+    }
+
+    .lead {
+      max-width: 680px;
+      margin: 24px 0 0;
+      color: var(--muted);
+      font-size: 1.1rem;
+    }
+
+    section {
+      padding: 36px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h2 {
+      margin: 0 0 16px;
+      font-size: 1.4rem;
+    }
+
+    p {
+      margin: 0 0 14px;
+    }
+
+    .profile-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-top: 20px;
+    }
+
+    .profile-card {
+      min-height: 120px;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--card);
+    }
+
+    .profile-card h3 {
+      margin: 0 0 8px;
+      color: var(--accent-dark);
+      font-size: 1rem;
+    }
+
+    .profile-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .contact {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .contact a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+      padding: 10px 16px;
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      color: var(--accent-dark);
+      font-weight: 700;
+      text-decoration: none;
+      background: #ffffff;
+    }
+
+    .contact a:hover,
+    .contact a:focus-visible {
+      color: #ffffff;
+      background: var(--accent);
+      outline: none;
+    }
+
+    footer {
+      padding-top: 28px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    @media (max-width: 720px) {
+      main {
+        width: min(100% - 24px, 920px);
+        padding: 28px 0;
+      }
+
+      .hero {
+        padding: 36px 0 28px;
+      }
+
+      .profile-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="hero">
+      <p class="eyebrow">Personal Website</p>
+      <h1>こんにちは、あなたの名前です。</h1>
+      <p class="lead">
+        ここは自己紹介のためのシンプルなWebサイトです。日々の活動、興味のあること、
+        これまでに取り組んできたことを少しずつまとめていきます。
+      </p>
+    </header>
+
+    <section aria-labelledby="about-title">
+      <h2 id="about-title">About</h2>
+      <p>
+        Web制作やプログラミングに興味があります。使いやすく、読みやすく、
+        長く育てていけるものを作ることを大切にしています。
+      </p>
+      <p>
+        このページはGitHub Pagesで公開するための最初のページです。
+        内容は自由に編集して、自分らしいプロフィールに変更できます。
+      </p>
+    </section>
+
+    <section aria-labelledby="interests-title">
+      <h2 id="interests-title">Interests</h2>
+      <div class="profile-grid">
+        <article class="profile-card">
+          <h3>Web</h3>
+          <p>HTML、CSS、JavaScriptを使ったサイト制作に関心があります。</p>
+        </article>
+        <article class="profile-card">
+          <h3>Learning</h3>
+          <p>新しい技術やツールを試しながら、少しずつできることを増やしています。</p>
+        </article>
+        <article class="profile-card">
+          <h3>Creation</h3>
+          <p>アイデアを形にして、公開しながら改善していくことが好きです。</p>
+        </article>
+      </div>
+    </section>
+
+    <section aria-labelledby="contact-title">
+      <h2 id="contact-title">Contact</h2>
+      <p>連絡先やSNSへのリンクをここに追加できます。</p>
+      <div class="contact">
+        <a href="mailto:your.email@example.com">Email</a>
+        <a href="https://github.com/" target="_blank" rel="noreferrer">GitHub</a>
+      </div>
+    </section>
+
+    <footer>
+      <p>&copy; 2026 Your Name</p>
+    </footer>
+  </main>
+</body>
+</html>
