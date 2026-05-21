@@ -16,6 +16,7 @@ const SHUFFLE_TEXT = {
   5: "全員で反時計回りに手札を全交換",
   6: "ドクロ。何も起きない"
 };
+const ACTION_HOLD_MS = 1600;
 
 let state = null;
 let socket = null;
@@ -24,6 +25,7 @@ let selectedCardId = null;
 let localMode = !configuredHost;
 let broadcast = null;
 let npcTimer = null;
+let resolutionTimer = null;
 let pendingCreate = null;
 let missingRoomId = "";
 
@@ -217,7 +219,8 @@ function renderGame() {
   const me = state.players.find((player) => player.id === clientId);
   const turn = currentPlayer();
   const target = turn ? drawTargetFor(turn, state) : null;
-  const myTurn = isMe(turn) && !turn.isNPC;
+  const resolving = state.turnPhase !== "draw";
+  const myTurn = isMe(turn) && !turn.isNPC && !resolving;
   const opponents = state.players
     .filter((player) => player.id !== clientId)
     .sort((a, b) => a.seatIndex - b.seatIndex);
@@ -226,19 +229,22 @@ function renderGame() {
       <section class="panel info-bar">
         <div>
           <h2>${escapeHtml(turn ? `${turn.name} のターン` : "進行中")}</h2>
-          <div class="muted">${escapeHtml(state.lastAction?.text || "カードを引く前に、ジョーカー所持者はシャッフルタイムを使えます。")}</div>
+          <div class="muted">${escapeHtml(resolving ? "処理中です。結果を確認してください。" : (state.lastAction?.text || "カードを引く前に、ジョーカー所持者はシャッフルタイムを使えます。"))}</div>
         </div>
         <div class="button-row">
           <button id="shuffleTime" class="gold" ${myTurn && canShuffle(turn) ? "" : "disabled"}>シャッフルタイム</button>
         </div>
       </section>
-      <section class="table">
+      <section class="table ${resolving ? "resolving" : ""}">
         ${opponents.map((player, index) => opponentHtml(player, index, player.id === target?.id)).join("")}
-        <div class="center-log">
+        <div class="center-log ${actionClass()}">
+          ${state.lastAction?.roll ? `<span class="dice-face">${state.lastAction.roll}</span>` : ""}
           <strong>${escapeHtml(state.lastAction?.title || "BABA抜き")}</strong>
           <span>${escapeHtml(state.lastAction?.detail || "右隣から1枚引き、ペアは自動で捨てられます。")}</span>
+          ${resolving ? `<small>少し待ってから次の操作に進みます</small>` : ""}
         </div>
       </section>
+      ${actionLogHtml()}
       <section class="panel player-hand">
         ${me ? playerHandHtml(me, myTurn, target) : spectateHtml()}
       </section>
@@ -252,6 +258,7 @@ function renderGame() {
     button.addEventListener("click", () => sendAction("draw", { index: Number(button.dataset.pickIndex) }));
   });
   scheduleNpc();
+  scheduleResolution();
 }
 
 function renderResult() {
@@ -301,8 +308,11 @@ function createWaitingState(id, name, playerCount, npcLevel) {
     }],
     currentTurnIndex: 0,
     turnPhase: "draw",
+    pendingTurnIndex: null,
+    resolveAt: null,
     finishCounter: 0,
-    lastAction: { title: "待機中", text: "ルームを作成しました。", detail: "URLを共有して参加できます。" }
+    actionLog: [],
+    lastAction: makeAction("待機中", "ルームを作成しました。", "URLを共有して参加できます。")
   };
 }
 
@@ -339,12 +349,11 @@ function startGame(game) {
   const maxPlayer = game.players.find((player) => player.hand.length === maxCards);
   game.currentTurnIndex = nextSeat(maxPlayer.seatIndex, game, 1);
   game.status = "playing";
+  game.turnPhase = "draw";
+  game.pendingTurnIndex = null;
+  game.resolveAt = null;
   game.finishCounter = 0;
-  game.lastAction = {
-    title: "ゲーム開始",
-    text: `${game.players.find((p) => p.seatIndex === game.currentTurnIndex).name} から開始`,
-    detail: "初期ペアを捨てました。"
-  };
+  setAction(game, "ゲーム開始", `${game.players.find((p) => p.seatIndex === game.currentTurnIndex).name} から開始`, "初期ペアを捨てました。", "start");
   checkFinished(game);
   if (game.status === "playing" && playerBySeat(game.currentTurnIndex, game)?.isFinished) {
     game.currentTurnIndex = nextSeat(game.currentTurnIndex, game, -1);
@@ -353,6 +362,7 @@ function startGame(game) {
 
 function drawCard(game, playerId, index) {
   const player = game.players.find((item) => item.id === playerId);
+  if (game.turnPhase !== "draw") return;
   if (!player || player.isFinished || player.seatIndex !== game.currentTurnIndex) return;
   const target = drawTargetFor(player, game);
   if (!target || target.hand.length === 0) return;
@@ -362,17 +372,15 @@ function drawCard(game, playerId, index) {
   player.memory.push({ from: target.id, rank: card.rank });
   const discardCount = discardPairs(player, game);
   arrangeNpcJoker(player, game.npcLevel);
-  game.lastAction = {
-    title: `${player.name} がカードを引いた`,
-    text: `${target.name} から1枚引きました。`,
-    detail: discardCount ? `${discardCount / 2} 組のペアを捨てました。` : "ペアはできませんでした。"
-  };
+  const pairText = discardCount ? `${discardCount / 2} 組のペアを捨てました。` : "ペアはできませんでした。";
+  setAction(game, `${player.name} がカードを引いた`, `${target.name} から1枚引きました。`, pairText, "draw");
   checkFinished(game);
-  if (game.status === "playing") advanceTurn(game);
+  if (game.status === "playing") holdForNextTurn(game, nextSeat(game.currentTurnIndex, game, -1));
 }
 
 function runShuffleTime(game, playerId) {
   const player = game.players.find((item) => item.id === playerId);
+  if (game.turnPhase !== "draw") return;
   if (!canShuffleFor(player, game)) return;
   player.hasShuffleUsed = true;
   const roll = Math.floor(Math.random() * 6) + 1;
@@ -393,13 +401,16 @@ function runShuffleTime(game, playerId) {
     if (!item.isFinished) discardPairs(item, game);
     arrangeNpcJoker(item, game.npcLevel);
   });
-  game.lastAction = {
-    title: `出目: ${roll}`,
-    text: SHUFFLE_TEXT[roll],
-    detail: success ? "シャッフルタイムが成立しました。" : "対象不在またはドクロのため、何も起きませんでした。"
-  };
+  setAction(
+    game,
+    `シャッフルタイム 出目: ${roll}`,
+    SHUFFLE_TEXT[roll],
+    success ? "シャッフルタイムが成立しました。" : "対象不在またはドクロのため、何も起きませんでした。",
+    "shuffle",
+    { roll }
+  );
   checkFinished(game);
-  if (game.status === "playing" && player.isFinished) advanceTurn(game);
+  if (game.status === "playing") holdForNextTurn(game, player.isFinished ? nextSeat(game.currentTurnIndex, game, -1) : game.currentTurnIndex);
 }
 
 function discardPairs(player, game) {
@@ -431,16 +442,38 @@ function checkFinished(game) {
   if (active.length <= 1 && game.status === "playing") {
     game.status = "finished";
     game.loser = active[0] || null;
-    game.lastAction = {
-      title: "ゲーム終了",
-      text: `${active[0]?.name || "不明"} が最弱王です。`,
-      detail: "最後までジョーカーを持っていたプレイヤーの負けです。"
-    };
+    setAction(game, "ゲーム終了", `${active[0]?.name || "不明"} が最弱王です。`, "最後までジョーカーを持っていたプレイヤーの負けです。", "finish");
   }
 }
 
 function advanceTurn(game) {
   game.currentTurnIndex = nextSeat(game.currentTurnIndex, game, -1);
+}
+
+function holdForNextTurn(game, nextTurnIndex) {
+  game.turnPhase = "resolving";
+  game.pendingTurnIndex = nextTurnIndex;
+  game.resolveAt = Date.now() + ACTION_HOLD_MS;
+}
+
+function completeResolution(game) {
+  if (!game || game.status !== "playing" || game.turnPhase === "draw") return;
+  if (typeof game.pendingTurnIndex === "number") game.currentTurnIndex = game.pendingTurnIndex;
+  game.pendingTurnIndex = null;
+  game.resolveAt = null;
+  game.turnPhase = "draw";
+  const turn = game.players.find((player) => player.seatIndex === game.currentTurnIndex);
+  if (turn) setAction(game, `${turn.name} のターン`, "カードを1枚引いてください。", "ジョーカーを持っている場合は、引く前にシャッフルタイムを使えます。", "turn");
+}
+
+function makeAction(title, text, detail, kind = "info", extra = {}) {
+  return { id: randomId("action"), title, text, detail, kind, at: Date.now(), ...extra };
+}
+
+function setAction(game, title, text, detail, kind = "info", extra = {}) {
+  const action = makeAction(title, text, detail, kind, extra);
+  game.lastAction = action;
+  game.actionLog = [action, ...(game.actionLog || [])].slice(0, 6);
 }
 
 function nextSeat(seatIndex, game, direction) {
@@ -526,7 +559,7 @@ async function performNpcTurn() {
     runShuffleTime(state, npc.id);
     saveLocal();
     render();
-    await wait(700);
+    return;
   }
   if (state.status === "playing" && currentPlayer()?.id === npc.id) {
     const target = drawTargetFor(npc, state);
@@ -595,6 +628,7 @@ function applyLocalAction(type, payload) {
         seatIndex: state.players.length,
         memory: []
       });
+      setAction(state, "参加", `${payload.name || "ゲスト"} が参加しました。`, "ホストが開始できます。", "join");
     }
   }
   if (type === "start" && state.hostId === clientId && state.status === "waiting") startGame(state);
@@ -612,7 +646,11 @@ function applyLocalAction(type, payload) {
       seatIndex: index,
       memory: []
     }));
-    state.lastAction = { title: "再戦待機", text: "同じ人間プレイヤーで再戦できます。", detail: "開始するとNPCを補填します。" };
+    state.turnPhase = "draw";
+    state.pendingTurnIndex = null;
+    state.resolveAt = null;
+    state.actionLog = [];
+    setAction(state, "再戦待機", "同じ人間プレイヤーで再戦できます。", "開始するとNPCを補填します。", "rematch");
   }
   saveLocal();
   render();
@@ -636,6 +674,7 @@ function connectRoom(id) {
       renderMissingRoom(id);
       return false;
     }
+    ensureGameDefaults(state);
     missingRoomId = "";
     broadcast = new BroadcastChannel(`baba_${id}`);
     broadcast.onmessage = (event) => {
@@ -666,6 +705,7 @@ function connectRoom(id) {
     const message = JSON.parse(event.data);
     if (message.type === "state") {
       state = message.state;
+      ensureGameDefaults(state);
       render();
     }
   });
@@ -698,16 +738,40 @@ function saveLocal() {
 
 function loadLocal(id) {
   const raw = localStorage.getItem(`baba_room_${id}`);
-  return raw ? JSON.parse(raw) : null;
+  return raw ? ensureGameDefaults(JSON.parse(raw)) : null;
+}
+
+function ensureGameDefaults(game) {
+  if (!game) return game;
+  if (!game.turnPhase) game.turnPhase = "draw";
+  if (!("pendingTurnIndex" in game)) game.pendingTurnIndex = null;
+  if (!("resolveAt" in game)) game.resolveAt = null;
+  if (!Array.isArray(game.actionLog)) game.actionLog = [];
+  if (!game.lastAction) game.lastAction = makeAction("進行中", "ゲームを再開しました。", "次の操作を選んでください。");
+  if (!game.lastAction.id) game.lastAction.id = randomId("action");
+  if (!game.lastAction.kind) game.lastAction.kind = "info";
+  return game;
 }
 
 function scheduleNpc() {
   clearTimeout(npcTimer);
   if (!localMode) return;
+  if (state.turnPhase !== "draw") return;
   const turn = currentPlayer();
   if (turn?.isNPC && state.status === "playing") {
     npcTimer = setTimeout(performNpcTurn, 250);
   }
+}
+
+function scheduleResolution() {
+  clearTimeout(resolutionTimer);
+  if (!localMode || !state || state.status !== "playing" || state.turnPhase === "draw") return;
+  const waitTime = Math.max(0, (state.resolveAt || Date.now()) - Date.now());
+  resolutionTimer = setTimeout(() => {
+    completeResolution(state);
+    saveLocal();
+    render();
+  }, waitTime);
 }
 
 function playerHandHtml(player, myTurn, target) {
@@ -725,8 +789,28 @@ function playerHandHtml(player, myTurn, target) {
         <div class="target-hand">
           ${target.hand.map((_, index) => `<button class="pick-card" data-pick-index="${index}" aria-label="${index + 1}枚目を引く"></button>`).join("")}
         </div>
-      ` : `<span class="muted">${currentPlayer()?.isNPC ? "NPCが考え中です。" : "自分のターンを待っています。"}</span>`}
+      ` : `<span class="muted">${state.turnPhase !== "draw" ? "結果を表示中です。" : currentPlayer()?.isNPC ? "NPCが考え中です。" : "自分のターンを待っています。"}</span>`}
     </div>
+  `;
+}
+
+function actionClass() {
+  const kind = state.lastAction?.kind || "info";
+  return `action-${kind}`;
+}
+
+function actionLogHtml() {
+  const items = (state.actionLog || []).slice(0, 4);
+  if (!items.length) return "";
+  return `
+    <section class="panel event-log" aria-label="直近のアクション">
+      ${items.map((action) => `
+        <div class="event-item">
+          <strong>${escapeHtml(action.title)}</strong>
+          <span>${escapeHtml(action.text)}</span>
+        </div>
+      `).join("")}
+    </section>
   `;
 }
 

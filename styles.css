@@ -332,12 +332,101 @@ input {
   color: #fff;
   background: rgba(11, 62, 51, 0.76);
   text-align: center;
+  animation: action-pop 420ms ease both;
 }
 
 .center-log strong {
   display: block;
   margin-bottom: 4px;
   font-size: 1.15rem;
+}
+
+.center-log small {
+  display: block;
+  margin-top: 10px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.center-log.action-draw {
+  border-color: rgba(244, 201, 93, 0.72);
+  box-shadow: 0 0 0 5px rgba(244, 201, 93, 0.13);
+}
+
+.center-log.action-shuffle {
+  border-color: rgba(37, 99, 235, 0.78);
+  background: rgba(18, 47, 92, 0.86);
+  box-shadow: 0 0 0 5px rgba(37, 99, 235, 0.18);
+}
+
+.center-log.action-turn {
+  border-color: rgba(255, 255, 255, 0.38);
+}
+
+.dice-face {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  margin: 0 auto 10px;
+  border-radius: 8px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 1.8rem;
+  font-weight: 950;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+}
+
+.table.resolving .opponent,
+.table.resolving .player-hand {
+  pointer-events: none;
+}
+
+.event-log {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px;
+}
+
+.event-item {
+  min-height: 62px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: #fff;
+}
+
+.event-item strong,
+.event-item span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-item strong {
+  margin-bottom: 2px;
+  font-size: 0.86rem;
+}
+
+.event-item span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+@keyframes action-pop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.94);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
 }
 
 .opponent {
@@ -521,8 +610,28 @@ input {
     transform: none;
   }
 
+  .center-log {
+    animation-name: action-pop-mobile;
+  }
+
+  .event-log {
+    grid-template-columns: 1fr;
+  }
+
   .card {
     flex-basis: 58px;
     height: 86px;
+  }
+}
+
+@keyframes action-pop-mobile {
+  0% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
   }
 }

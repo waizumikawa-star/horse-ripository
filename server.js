@@ -7,6 +7,7 @@ const SHUFFLE_TEXT = {
   5: "全員で反時計回りに手札を全交換",
   6: "ドクロ。何も起きない"
 };
+const ACTION_HOLD_MS = 1600;
 
 export default class Server {
   constructor(party) {
@@ -14,10 +15,13 @@ export default class Server {
     this.state = null;
     this.connectionPlayers = new Map();
     this.npcTimer = null;
+    this.resolveTimer = null;
   }
 
   async onStart() {
     this.state = await this.party.storage.get("state");
+    ensureGameDefaults(this.state);
+    this.scheduleResolution();
   }
 
   onConnect(connection) {
@@ -33,11 +37,7 @@ export default class Server {
       player.isNPC = true;
       player.connected = false;
       player.name = `${player.name} (NPC)`;
-      this.state.lastAction = {
-        title: "切断",
-        text: `${player.name} をNPCに置き換えました。`,
-        detail: "ゲームは続行されます。"
-      };
+      setAction(this.state, "切断", `${player.name} をNPCに置き換えました。`, "ゲームは続行されます。", "disconnect");
       await this.persistAndBroadcast();
     }
   }
@@ -72,6 +72,7 @@ export default class Server {
   async persistAndBroadcast() {
     await this.party.storage.put("state", this.state);
     this.broadcastState();
+    this.scheduleResolution();
     this.scheduleNpc();
   }
 
@@ -91,17 +92,31 @@ export default class Server {
   scheduleNpc() {
     clearTimeout(this.npcTimer);
     const turn = currentPlayer(this.state);
-    if (!turn?.isNPC || this.state.status !== "playing") return;
+    if (!turn?.isNPC || this.state.status !== "playing" || this.state.turnPhase !== "draw") return;
     this.npcTimer = setTimeout(async () => {
       const npc = currentPlayer(this.state);
-      if (!npc?.isNPC || this.state.status !== "playing") return;
-      if (npcShouldShuffle(npc, this.state)) runShuffleTime(this.state, npc.id);
+      if (!npc?.isNPC || this.state.status !== "playing" || this.state.turnPhase !== "draw") return;
+      if (npcShouldShuffle(npc, this.state)) {
+        runShuffleTime(this.state, npc.id);
+        await this.persistAndBroadcast();
+        return;
+      }
       if (this.state.status === "playing" && currentPlayer(this.state)?.id === npc.id) {
         const target = drawTargetFor(npc, this.state);
         drawCard(this.state, npc.id, npcPickIndex(npc, target, this.state.npcLevel));
       }
       await this.persistAndBroadcast();
     }, 700 + Math.random() * 1000);
+  }
+
+  scheduleResolution() {
+    clearTimeout(this.resolveTimer);
+    if (!this.state || this.state.status !== "playing" || this.state.turnPhase === "draw") return;
+    const waitTime = Math.max(0, (this.state.resolveAt || Date.now()) - Date.now());
+    this.resolveTimer = setTimeout(async () => {
+      completeResolution(this.state);
+      await this.persistAndBroadcast();
+    }, waitTime);
   }
 }
 
@@ -115,8 +130,11 @@ function createWaitingState(roomId, hostId, name, playerCount, npcLevel) {
     players: [newPlayer(hostId, name || "ゲスト", false, 0)],
     currentTurnIndex: 0,
     turnPhase: "draw",
+    pendingTurnIndex: null,
+    resolveAt: null,
     finishCounter: 0,
-    lastAction: { title: "待機中", text: "ルームを作成しました。", detail: "URLを共有して参加できます。" }
+    actionLog: [],
+    lastAction: makeAction("待機中", "ルームを作成しました。", "URLを共有して参加できます。")
   };
 }
 
@@ -139,7 +157,7 @@ function joinGame(game, playerId, name) {
   if (game.players.some((player) => player.id === playerId)) return;
   if (game.players.filter((player) => !player.isNPC).length >= game.playerCount) return;
   game.players.push(newPlayer(playerId, name || "ゲスト", false, game.players.length));
-  game.lastAction = { title: "参加", text: `${name || "ゲスト"} が参加しました。`, detail: "ホストが開始できます。" };
+  setAction(game, "参加", `${name || "ゲスト"} が参加しました。`, "ホストが開始できます。", "join");
 }
 
 function startGame(game) {
@@ -164,12 +182,11 @@ function startGame(game) {
   const maxPlayer = game.players.find((player) => player.hand.length === maxCards);
   game.currentTurnIndex = nextSeat(maxPlayer.seatIndex, game, 1);
   game.status = "playing";
+  game.turnPhase = "draw";
+  game.pendingTurnIndex = null;
+  game.resolveAt = null;
   game.finishCounter = 0;
-  game.lastAction = {
-    title: "ゲーム開始",
-    text: `${game.players.find((player) => player.seatIndex === game.currentTurnIndex).name} から開始`,
-    detail: "初期ペアを捨てました。"
-  };
+  setAction(game, "ゲーム開始", `${game.players.find((player) => player.seatIndex === game.currentTurnIndex).name} から開始`, "初期ペアを捨てました。", "start");
   checkFinished(game);
   if (game.status === "playing" && playerBySeat(game.currentTurnIndex, game)?.isFinished) {
     game.currentTurnIndex = nextSeat(game.currentTurnIndex, game, -1);
@@ -178,6 +195,7 @@ function startGame(game) {
 
 function drawCard(game, playerId, index) {
   const player = game.players.find((item) => item.id === playerId);
+  if (game.turnPhase !== "draw") return;
   if (!player || player.isFinished || player.seatIndex !== game.currentTurnIndex) return;
   const target = drawTargetFor(player, game);
   if (!target || !target.hand.length) return;
@@ -187,17 +205,20 @@ function drawCard(game, playerId, index) {
   player.memory.push({ from: target.id, rank: card.rank });
   const discardCount = discardPairs(player);
   arrangeNpcJoker(player, game.npcLevel);
-  game.lastAction = {
-    title: `${player.name} がカードを引いた`,
-    text: `${target.name} から1枚引きました。`,
-    detail: discardCount ? `${discardCount / 2} 組のペアを捨てました。` : "ペアはできませんでした。"
-  };
+  setAction(
+    game,
+    `${player.name} がカードを引いた`,
+    `${target.name} から1枚引きました。`,
+    discardCount ? `${discardCount / 2} 組のペアを捨てました。` : "ペアはできませんでした。",
+    "draw"
+  );
   checkFinished(game);
-  if (game.status === "playing") game.currentTurnIndex = nextSeat(game.currentTurnIndex, game, -1);
+  if (game.status === "playing") holdForNextTurn(game, nextSeat(game.currentTurnIndex, game, -1));
 }
 
 function runShuffleTime(game, playerId) {
   const player = game.players.find((item) => item.id === playerId);
+  if (game.turnPhase !== "draw") return;
   if (!canShuffleFor(player, game)) return;
   player.hasShuffleUsed = true;
   const roll = Math.floor(Math.random() * 6) + 1;
@@ -216,15 +237,16 @@ function runShuffleTime(game, playerId) {
     if (!item.isFinished) discardPairs(item);
     arrangeNpcJoker(item, game.npcLevel);
   });
-  game.lastAction = {
-    title: `出目: ${roll}`,
-    text: SHUFFLE_TEXT[roll],
-    detail: success ? "シャッフルタイムが成立しました。" : "対象不在またはドクロのため、何も起きませんでした。"
-  };
+  setAction(
+    game,
+    `シャッフルタイム 出目: ${roll}`,
+    SHUFFLE_TEXT[roll],
+    success ? "シャッフルタイムが成立しました。" : "対象不在またはドクロのため、何も起きませんでした。",
+    "shuffle",
+    { roll }
+  );
   checkFinished(game);
-  if (game.status === "playing" && player.isFinished) {
-    game.currentTurnIndex = nextSeat(game.currentTurnIndex, game, -1);
-  }
+  if (game.status === "playing") holdForNextTurn(game, player.isFinished ? nextSeat(game.currentTurnIndex, game, -1) : game.currentTurnIndex);
 }
 
 function discardPairs(player) {
@@ -256,12 +278,24 @@ function checkFinished(game) {
   if (active.length <= 1 && game.status === "playing") {
     game.status = "finished";
     game.loser = active[0] || null;
-    game.lastAction = {
-      title: "ゲーム終了",
-      text: `${active[0]?.name || "不明"} が最弱王です。`,
-      detail: "最後までジョーカーを持っていたプレイヤーの負けです。"
-    };
+    setAction(game, "ゲーム終了", `${active[0]?.name || "不明"} が最弱王です。`, "最後までジョーカーを持っていたプレイヤーの負けです。", "finish");
   }
+}
+
+function holdForNextTurn(game, nextTurnIndex) {
+  game.turnPhase = "resolving";
+  game.pendingTurnIndex = nextTurnIndex;
+  game.resolveAt = Date.now() + ACTION_HOLD_MS;
+}
+
+function completeResolution(game) {
+  if (!game || game.status !== "playing" || game.turnPhase === "draw") return;
+  if (typeof game.pendingTurnIndex === "number") game.currentTurnIndex = game.pendingTurnIndex;
+  game.pendingTurnIndex = null;
+  game.resolveAt = null;
+  game.turnPhase = "draw";
+  const turn = game.players.find((player) => player.seatIndex === game.currentTurnIndex);
+  if (turn) setAction(game, `${turn.name} のターン`, "カードを1枚引いてください。", "ジョーカーを持っている場合は、引く前にシャッフルタイムを使えます。", "turn");
 }
 
 function rematch(game) {
@@ -277,8 +311,34 @@ function rematch(game) {
     memory: []
   }));
   game.currentTurnIndex = 0;
+  game.turnPhase = "draw";
+  game.pendingTurnIndex = null;
+  game.resolveAt = null;
   game.finishCounter = 0;
-  game.lastAction = { title: "再戦待機", text: "同じ人間プレイヤーで再戦できます。", detail: "開始するとNPCを補填します。" };
+  game.actionLog = [];
+  setAction(game, "再戦待機", "同じ人間プレイヤーで再戦できます。", "開始するとNPCを補填します。", "rematch");
+}
+
+function makeAction(title, text, detail, kind = "info", extra = {}) {
+  return { id: randomId("action"), title, text, detail, kind, at: Date.now(), ...extra };
+}
+
+function setAction(game, title, text, detail, kind = "info", extra = {}) {
+  const action = makeAction(title, text, detail, kind, extra);
+  game.lastAction = action;
+  game.actionLog = [action, ...(game.actionLog || [])].slice(0, 6);
+}
+
+function ensureGameDefaults(game) {
+  if (!game) return game;
+  if (!game.turnPhase) game.turnPhase = "draw";
+  if (!("pendingTurnIndex" in game)) game.pendingTurnIndex = null;
+  if (!("resolveAt" in game)) game.resolveAt = null;
+  if (!Array.isArray(game.actionLog)) game.actionLog = [];
+  if (!game.lastAction) game.lastAction = makeAction("進行中", "ゲームを再開しました。", "次の操作を選んでください。");
+  if (!game.lastAction.id) game.lastAction.id = randomId("action");
+  if (!game.lastAction.kind) game.lastAction.kind = "info";
+  return game;
 }
 
 function reorderHand(game, playerId, handIds) {
