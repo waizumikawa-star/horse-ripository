@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BABA抜き</title>
+</head>
+<body>
+  <script>
+    const parts = location.pathname.split("/").filter(Boolean);
+    const roomIndex = parts.indexOf("room");
+
+    if (roomIndex >= 0 && parts[roomIndex + 1]) {
+      const baseParts = parts.slice(0, roomIndex);
+      const basePath = baseParts.length ? `/${baseParts.join("/")}/` : "/";
+      location.replace(`${location.origin}${basePath}#/room/${parts[roomIndex + 1]}${location.search}`);
+    } else {
+      const basePath = parts.length ? `/${parts[0]}/` : "/";
+      location.replace(`${location.origin}${basePath}`);
+    }
+  </script>
+</body>
+</html>

@@ -7,6 +7,7 @@ VS嵐の「BABA嵐」をモチーフにした、シャッフルタイム付き�
 - `index.html` / `styles.css` / `app.js`: Cloudflare Pages向けの静的フロントエンド
 - `server.js`: PartyKit WebSocketサーバー
 - `_redirects`: Pagesで `/room/:id` へ直接アクセスしても `index.html` を返す設定
+- `404.html`: GitHub Pagesで `/room/:id` に直接アクセスした時に `#/room/:id` へ戻す設定
 
 PartyKit hostを未設定のまま開くと、同一ブラウザ内で遊べるローカル/NPCモードになります。
 
@@ -33,6 +34,9 @@ npm run deploy:party
 
 Cloudflare Pagesには、このリポジトリの静的ファイルをデプロイします。
 デプロイ後、トップ画面の `PartyKit host` に PartyKit のホスト名を保存するとオンライン対戦で動作します。
+
+GitHub Pagesで公開する場合は、共有リンクは `https://ユーザー名.github.io/horse-ripository/#/room/ルームID` の形式になります。
+`http://localhost:5500` や `127.0.0.1` のリンクは自分の環境専用なので、他人には共有できません。
 
 ## 実装済みルール
 
