@@ -1,6 +1,7 @@
 const app = document.querySelector("#app");
 const params = new URLSearchParams(location.search);
-const configuredHost = params.get("host") || localStorage.getItem("baba_partykit_host") || "";
+const configuredHost = normalizeHost(params.get("host") || localStorage.getItem("baba_partykit_host") || "");
+if (params.get("host")) localStorage.setItem("baba_partykit_host", configuredHost);
 const clientId = localStorage.getItem("baba_client_id") || `player_${crypto.randomUUID()}`;
 localStorage.setItem("baba_client_id", clientId);
 
@@ -35,7 +36,6 @@ const rankOf = (card) => card.rank ?? "joker";
 const cardLabel = (card) => card.suit === "joker" ? "JOKER" : `${RANK_LABELS[card.rank] || card.rank}${SUIT_LABELS[card.suit]}`;
 const hasJoker = (player) => player.hand.some((card) => card.suit === "joker");
 const canShuffle = (player) => player && hasJoker(player) && !player.hasShuffleUsed && activePlayers().length >= 3;
-const roomUrl = (id) => `${location.origin}${location.pathname}#/room/${id}`;
 const randomId = (prefix) => `${prefix}_${crypto.randomUUID().slice(0, 8)}`;
 
 function route() {
@@ -93,7 +93,7 @@ function renderHome() {
       <section class="panel home-actions">
         <div>
           <h2>ルーム</h2>
-          <p class="muted">URLを共有して参加できます。PartyKitホスト未設定時はこのブラウザ内で遊べるNPCモードになります。</p>
+          <p class="muted">他人と遊ぶにはPartyKit hostが必要です。host設定後に作ったルームURLは、そのまま共有できます。</p>
         </div>
         <button id="goCreate">ルーム作成</button>
         <div class="field">
@@ -112,11 +112,17 @@ function renderHome() {
   document.querySelector("#goCreate").addEventListener("click", () => navigate("/create"));
   document.querySelector("#joinRoom").addEventListener("click", () => {
     const raw = document.querySelector("#joinInput").value.trim();
-    const id = parseRoomId(raw);
-    if (id) navigate(`/room/${id}`);
+    const join = parseJoinInfo(raw);
+    if (!join.id) return;
+    if (join.host && join.host !== configuredHost) {
+      localStorage.setItem("baba_partykit_host", join.host);
+      location.href = `${appBaseUrl()}?host=${encodeURIComponent(join.host)}#/room/${join.id}`;
+      return;
+    }
+    navigate(`/room/${join.id}`);
   });
   document.querySelector("#saveHost").addEventListener("click", () => {
-    const host = document.querySelector("#hostInput").value.trim().replace(/^wss?:\/\//, "");
+    const host = normalizeHost(document.querySelector("#hostInput").value);
     if (host) localStorage.setItem("baba_partykit_host", host);
     else localStorage.removeItem("baba_partykit_host");
     location.reload();
@@ -782,18 +788,45 @@ function navigate(path) {
   else location.hash = path;
 }
 
-function parseRoomId(raw) {
-  if (!raw) return "";
+function appBaseUrl() {
+  let path = location.pathname;
+  path = path.replace(/\/room\/[^/]+\/?$/, "/");
+  path = path.replace(/\/create\/?$/, "/");
+  path = path.replace(/\/index\.html$/, "/");
+  if (!path.endsWith("/")) path += "/";
+  return `${location.origin}${path}`;
+}
+
+function roomUrl(id) {
+  const hostQuery = configuredHost ? `?host=${encodeURIComponent(configuredHost)}` : "";
+  return `${appBaseUrl()}${hostQuery}#/room/${id}`;
+}
+
+function parseJoinInfo(raw) {
+  if (!raw) return { id: "", host: "" };
   try {
     const url = new URL(raw);
-    const hashMatch = url.hash.match(/\/room\/([^/]+)/);
-    if (hashMatch) return hashMatch[1];
-    const pathMatch = url.pathname.match(/\/room\/([^/]+)/);
-    if (pathMatch) return pathMatch[1];
+    const host = normalizeHost(url.searchParams.get("host") || "");
+    const hashMatch = url.hash.match(/\/room\/([^/?#]+)/);
+    if (hashMatch) return { id: hashMatch[1], host };
+    const pathMatch = url.pathname.match(/\/room\/([^/?#]+)/);
+    if (pathMatch) return { id: pathMatch[1], host };
   } catch {
-    return raw.replace(/^#?\/?room\//, "");
+    return { id: raw.replace(/^#?\/?room\//, ""), host: "" };
   }
-  return raw.replace(/^#?\/?room\//, "");
+  return { id: raw.replace(/^#?\/?room\//, ""), host: "" };
+}
+
+function parseRoomId(raw) {
+  return parseJoinInfo(raw).id;
+}
+
+function normalizeHost(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^https?:\/\//, "")
+    .replace(/^wss?:\/\//, "")
+    .replace(/\/+$/, "");
 }
 
 function escapeHtml(value) {

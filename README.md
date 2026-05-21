@@ -35,7 +35,7 @@ npm run deploy:party
 Cloudflare Pagesには、このリポジトリの静的ファイルをデプロイします。
 デプロイ後、トップ画面の `PartyKit host` に PartyKit のホスト名を保存するとオンライン対戦で動作します。
 
-GitHub Pagesで公開する場合は、共有リンクは `https://ユーザー名.github.io/horse-ripository/#/room/ルームID` の形式になります。
+GitHub Pagesで公開する場合は、共有リンクは `https://ユーザー名.github.io/horse-ripository/?host=PartyKitホスト名#/room/ルームID` の形式になります。
 `http://localhost:5500` や `127.0.0.1` のリンクは自分の環境専用なので、他人には共有できません。
 
 ## 実装済みルール
