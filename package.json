@@ -1,0 +1,15 @@
+{
+  "name": "baba-nuki-online",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:front": "python3 -m http.server 4173",
+    "dev:party": "partykit dev server.js",
+    "deploy:party": "partykit deploy server.js",
+    "check": "node --check app.js && node --check server.js"
+  },
+  "devDependencies": {
+    "partykit": "^0.0.115"
+  }
+}
